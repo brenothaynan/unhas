@@ -339,7 +339,7 @@
 
 <header class="container" style="display: block; margin-bottom: 20px;">
     <h1>SPA DAS UNHAS</h1>
-    <p>Painel de Controle: Agendamentos por Telefone, PDV Completo & Relatório de Fechamento</p>
+    <p>Painel de Controle: Agendamentos em Tempo Real, PDV Completo & Relatório de Fechamento</p>
 </header>
 
 <div class="container" id="app-block">
@@ -526,7 +526,67 @@
     </div>
 </div>
 
-    <!-- SCRIPT DO SISTEMA -->
+    <!-- CARREGAMENTO DO BANCO DE DADOS DO GOOGLE (FIREBASE) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, push, onValue, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // Credenciais do seu painel do Google inseridas com sucesso
+        const firebaseConfig = {
+            apiKey: "AIzaSyAAaQ0NwOrJpnzZB44GKRzVtISfMcSo28I",
+            authDomain: "spaunhas-79981.firebaseapp.com",
+            databaseURL: "https://spaunhas-79981-default-rtdb.firebaseio.com",
+            projectId: "spaunhas-79981",
+            storageBucket: "spaunhas-79981.firebasestorage.app",
+            messagingSenderId: "869786978764",
+            appId: "1:869786978764:web:03addea3e53fedf6a07569"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        window.agendamentosDB = [];
+        window.vendasDB = [];
+
+        onValue(ref(db, 'agendamentos'), (snapshot) => {
+            const data = snapshot.val();
+            window.agendamentosDB = data ? Object.values(data) : [];
+            window.renderizarGradeCompleta();
+            window.buscarAgendamentoPorTelefone();
+        });
+
+        onValue(ref(db, 'vendas'), (snapshot) => {
+            const data = snapshot.val();
+            window.vendasDB = data ? Object.values(data) : [];
+            window.atualizarFinanceiroDiario();
+        });
+
+        window.dbSalvarAgendamento = function(objeto) {
+            const novoRef = push(ref(db, 'agendamentos'));
+            objeto.firebaseKey = novoRef.key;
+            set(novoRef, objeto);
+        };
+
+        window.dbDeletarAgendamento = function(id) {
+            onValue(ref(db, 'agendamentos'), (snapshot) => {
+                const data = snapshot.val();
+                if(data) {
+                    Object.keys(data).forEach(key => {
+                        if(data[key].id === id) {
+                            remove(ref(db, `agendamentos/${key}`));
+                        }
+                    });
+                }
+            }, { onlyOnce: true });
+        };
+
+        window.dbSalvarVenda = function(objeto) {
+            const novoRef = push(ref(db, 'vendas'));
+            set(novoRef, objeto);
+        };
+    </script>
+
+    <!-- LOGICA DO SISTEMA ADAPTADA PARA RODAR NA NUVEM -->
     <script>
         function mascaraTelefone(input) {
             let v = input.value.replace(/\D/g, "");
@@ -545,10 +605,7 @@
         document.getElementById('filtro-data-agenda').value = hoje;
         document.getElementById('filtro-data-financeiro').value = hoje;
 
-        let agendamentosDB = [];
-        let vendasDB = [];
         let carrinho = [];
-
         const horariosPermitidos = ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"];
 
         function formatarMoeda(valor) {
@@ -580,21 +637,21 @@
                 return;
             }
 
-            if (agendamentosDB.some(ag => ag.data === data && ag.hora === hora)) {
-                alert('Este horário já está reservado nesta data!');
+            if (window.agendamentosDB.some(ag => ag.data === data && ag.hora === hora)) {
+                alert('Bloqueado! Outro dispositivo acabou de reservar esse horário nesta data.');
                 return;
             }
 
-            agendamentosDB.push({ id: Date.now(), cliente, telefone: telephone, servico, preco: precoServico, data, hora });
+            window.dbSalvarAgendamento({ id: Date.now(), cliente, telefone: telephone, servico, preco: precoServico, data, hora });
+            
             formAgendamento.reset();
             document.getElementById('data').value = data;
-            renderizarGradeCompleta();
-            buscarAgendamentoPorTelefone();
         });
 
         function renderizarGradeCompleta() {
             const dataFiltro = document.getElementById('filtro-data-agenda').value;
             const containerGrade = document.getElementById('grade-horarios');
+            if (!containerGrade) return;
             containerGrade.innerHTML = '';
 
             if (new Date(dataFiltro + 'T00:00:00').getDay() === 0) {
@@ -602,7 +659,7 @@
                 return;
             }
 
-            const agendamentosDoDia = agendamentosDB.filter(ag => ag.data === dataFiltro);
+            const agendamentosDoDia = window.agendamentosDB.filter(ag => ag.data === dataFiltro);
 
             horariosPermitidos.forEach(hora => {
                 const agendamentoEncontrado = agendamentosDoDia.find(ag => ag.hora === hora);
@@ -634,16 +691,15 @@
 
         function cancelarAgendamento(id) {
             if(confirm("Tem certeza que deseja cancelar este agendamento?")) {
-                agendamentosDB = agendamentosDB.filter(ag => ag.id !== id);
-                renderizarGradeCompleta();
-                buscarAgendamentoPorTelefone();
-                alert("Agendamento cancelado com sucesso.");
+                window.dbDeletarAgendamento(id);
+                alert("Agendamento removido da nuvem com sucesso.");
             }
         }
 
         function buscarAgendamentoPorTelefone() {
             const telefoneBusca = document.getElementById('busca-telefone').value.trim();
             const boxResultados = document.getElementById('resultados-busca');
+            if(!boxResultados) return;
             
             if(telefoneBusca.length === 0) {
                 boxResultados.style.display = 'none';
@@ -653,7 +709,7 @@
             boxResultados.style.display = 'block';
             boxResultados.innerHTML = '<h4 style="margin-bottom:10px; color:var(--secondary);">Agendamentos Encontrados:</h4>';
 
-            const resultados = agendamentosDB.filter(ag => ag.telefone.includes(telefoneBusca));
+            const resultados = window.agendamentosDB.filter(ag => ag.telefone.includes(telefoneBusca));
             if(resultados.length === 0) {
                 boxResultados.innerHTML += '<p style="font-style:italic; color:#7f8c8d; font-size:0.9rem;">Nenhum agendamento ativo.</p>';
                 return;
@@ -726,7 +782,7 @@
             let troco = Math.max(0, pago - liq);
             const horaV = new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
 
-            vendasDB.push({ id: Date.now(), hora: horaV, data: dataC, cliente: nomeC, telefone: telC, descricao: carrinho.map(c => `${c.qtd}x ${c.nome}`).join(', '), formaPagamento: formapg, totalLiquido: liq });
+            window.dbSalvarVenda({ id: Date.now(), hora: horaV, data: dataC, cliente: nomeC, telefone: telC, descricao: carrinho.map(c => `${c.qtd}x ${c.nome}`).join(', '), formaPagamento: formapg, totalLiquido: liq });
 
             let receiptHTML = `
                 <div class="print-header">
@@ -774,7 +830,6 @@
                 document.getElementById('pdv-nome-cliente').value = '';
                 document.getElementById('pdv-tel-cliente').value = '';
                 atualizarInterfaceCarrinho();
-                atualizarFinanceiroDiario();
                 alert('Venda processada com sucesso!');
             }, 150);
         }
@@ -783,9 +838,10 @@
             const dataF = document.getElementById('filtro-data-financeiro').value;
             const containerT = document.getElementById('financeiro-total-dia');
             const listaH = document.getElementById('fin-lista-vendas');
+            if(!listaH || !containerT) return;
             listaH.innerHTML = '';
 
-            const filtradas = vendasDB.filter(v => v.data === dataF);
+            const filtradas = window.vendasDB.filter(v => v.data === dataF);
             let total = 0;
 
             filtradas.forEach(v => {
@@ -799,7 +855,7 @@
 
         function gerarPdfFinanceiro() {
             const dataF = document.getElementById('filtro-data-financeiro').value;
-            const filtradas = vendasDB.filter(v => v.data === dataF);
+            const filtradas = window.vendasDB.filter(v => v.data === dataF);
             if(filtradas.length === 0) return alert('Sem movimentações nesta data.');
 
             let total = 0;
@@ -838,9 +894,6 @@
                 document.getElementById('print-area').innerHTML = '';
             }, 150);
         }
-
-        renderizarGradeCompleta();
-        atualizarFinanceiroDiario();
     </script>
 </body>
 </html>
